@@ -10,7 +10,6 @@ import { User } from '@prisma/client';
 export class AuthService {
   public client = new OAuth2Client();
   public logger = new Logger(AuthService.name);
-
   constructor(
     private readonly configService: ConfigService,
     private prisma: PrismaService,
@@ -32,7 +31,6 @@ export class AuthService {
         idToken: token,
         audience: this.configService.get('AUTH').GOOGLE_CLIENT_ID,
       });
-
       return ticket.getPayload();
     } catch (err) {
       this.logger.error('Error during verifyingGoogleAuthToken');
@@ -55,7 +53,6 @@ export class AuthService {
       const payload = await this.verifyGoogleAuthToken(googleAuthDto.idToken);
 
       if (!payload) throw new UnauthorizedException('Invalid IdToken');
-
       const isUserExist = await this.prisma.user.findFirst({
         where: {
           email: payload.email,
