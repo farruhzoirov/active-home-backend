@@ -1,169 +1,85 @@
-import {
-  Injectable,
-  UnauthorizedException,
-  ConflictException,
-} from '@nestjs/common';
-import { PrismaService } from '@libs/database';
-import { AuthProvider } from '@prisma/client';
-import * as bcrypt from 'bcrypt';
-
-export interface LocalAuthDto {
-  email: string;
-  password: string;
-}
-
-export interface GoogleAuthDto {
-  googleId: string;
-  email: string;
-  firstName?: string;
-  lastName?: string;
-  image?: string;
-}
-
-export interface TelegramAuthDto {
-  telegramId: string;
-  username?: string;
-  firstName?: string;
-  lastName?: string;
-  image?: string;
-}
+import { Injectable, Logger, UnauthorizedException } from '@nestjs/common';
+import { OAuth2Client, TokenPayload } from 'google-auth-library';
+import * as jwt from 'jsonwebtoken';
+import { PrismaService } from '../../database/src/prisma.service';
+import { ConfigService } from '@nestjs/config';
+import { GoogleAuthDto } from './dto/auth.dto';
+import { User } from '@prisma/client';
 
 @Injectable()
 export class AuthService {
-  constructor(private prisma: PrismaService) {}
+  public client = new OAuth2Client();
+  public logger = new Logger(AuthService.name);
 
-  async localAuth(authDto: LocalAuthDto) {
-    const user = await this.prisma.user.findUnique({
-      where: { email: authDto.email },
-    });
-
-    if (!user || user.authProvider !== AuthProvider.LOCAL) {
-      throw new UnauthorizedException('Invalid credentials');
-    }
-
-    const isPasswordValid = await bcrypt.compare(
-      authDto.password,
-      user.password!,
-    );
-    if (!isPasswordValid) {
-      throw new UnauthorizedException('Invalid credentials');
-    }
-
-    return this.generateUserResponse(user);
-  }
-
-  async googleAuth(authDto: GoogleAuthDto) {
-    let user = await this.prisma.user.findFirst({
-      where: {
-        OR: [{ googleId: authDto.googleId }, { email: authDto.email }],
-      },
-    });
-
-    if (user) {
-      // Update existing user with Google info if needed
-      if (!user.googleId) {
-        user = await this.prisma.user.update({
-          where: { id: user.id },
-          data: {
-            googleId: authDto.googleId,
-            authProvider: AuthProvider.GOOGLE,
-            emailVerified: true,
-            emailVerifiedAt: new Date(),
-            ...(authDto.firstName && { firstName: authDto.firstName }),
-            ...(authDto.lastName && { lastName: authDto.lastName }),
-            ...(authDto.image && { image: authDto.image }),
-          },
-        });
-      }
-    } else {
-      // Create new user
-      user = await this.prisma.user.create({
-        data: {
-          googleId: authDto.googleId,
-          email: authDto.email,
-          authProvider: AuthProvider.GOOGLE,
-          firstName: authDto.firstName,
-          lastName: authDto.lastName,
-          image: authDto.image,
-          emailVerified: true,
-          emailVerifiedAt: new Date(),
-        },
-      });
-    }
-
-    return this.generateUserResponse(user);
-  }
-
-  async telegramAuth(authDto: TelegramAuthDto) {
-    let user = await this.prisma.user.findFirst({
-      where: {
-        OR: [
-          { telegramId: authDto.telegramId },
-          ...(authDto.username ? [{ username: authDto.username }] : []),
-        ],
-      },
-    });
-
-    if (user) {
-      // Update existing user with Telegram info if needed
-      if (!user.telegramId) {
-        user = await this.prisma.user.update({
-          where: { id: user.id },
-          data: {
-            telegramId: authDto.telegramId,
-            authProvider: AuthProvider.TELEGRAM,
-            ...(authDto.username && { username: authDto.username }),
-            ...(authDto.firstName && { firstName: authDto.firstName }),
-            ...(authDto.lastName && { lastName: authDto.lastName }),
-            ...(authDto.image && { image: authDto.image }),
-          },
-        });
-      }
-    } else {
-      // Create new user
-      user = await this.prisma.user.create({
-        data: {
-          telegramId: authDto.telegramId,
-          username: authDto.username,
-          authProvider: AuthProvider.TELEGRAM,
-          firstName: authDto.firstName,
-          lastName: authDto.lastName,
-          image: authDto.image,
-        },
-      });
-    }
-
-    return this.generateUserResponse(user);
-  }
-
-  async register(
-    authDto: LocalAuthDto & { firstName?: string; lastName?: string },
+  constructor(
+    private readonly configService: ConfigService,
+    private prisma: PrismaService,
   ) {
-    const existingUser = await this.prisma.user.findUnique({
-      where: { email: authDto.email },
-    });
-
-    if (existingUser) {
-      throw new ConflictException('User with this email already exists');
+    if (!configService.get('AUTH').GOOGLE_CLIENT_ID) {
+      this.logger.error('GOOGLE_CLIENT_ID not found ');
     }
 
-    const hashedPassword = await bcrypt.hash(authDto.password, 10);
-
-    const user = await this.prisma.user.create({
-      data: {
-        email: authDto.email,
-        password: hashedPassword,
-        authProvider: AuthProvider.LOCAL,
-        firstName: authDto.firstName,
-        lastName: authDto.lastName,
-      },
-    });
-
-    return this.generateUserResponse(user);
+    if (!configService.get('AUTH').JWT_SECRET_KEY) {
+      this.logger.error('JWT_SECRET_KEY not found ');
+    }
   }
 
-  private generateUserResponse(user: any) {
-    const { password, ...userWithoutPassword } = user;
-    return userWithoutPassword;
+  async verifyGoogleAuthToken(
+    token: string,
+  ): Promise<TokenPayload | undefined> {
+    try {
+      const ticket = await this.client.verifyIdToken({
+        idToken: token,
+        audience: this.configService.get('AUTH').GOOGLE_CLIENT_ID,
+      });
+
+      return ticket.getPayload();
+    } catch (err) {
+      this.logger.error('Error during verifyingGoogleAuthToken');
+      throw new UnauthorizedException('Invalid signature');
+    }
+  }
+
+  async generateJwtToken(payload: User): Promise<string> {
+    const jwtSecretKey = this.configService.get('AUTH').JWT_SECRET_KEY;
+    const { role, ...rest } = payload;
+    return jwt.sign(rest, jwtSecretKey, {
+      expiresIn: '7d',
+    });
+  }
+
+  async registerOrLoginWithGoogle(
+    googleAuthDto: GoogleAuthDto,
+  ): Promise<string> {
+    try {
+      const payload = await this.verifyGoogleAuthToken(googleAuthDto.idToken);
+
+      if (!payload) throw new UnauthorizedException('Invalid IdToken');
+
+      const isUserExist = await this.prisma.user.findFirst({
+        where: {
+          email: payload.email,
+        },
+      });
+
+      if (!isUserExist) {
+        const newUser = await this.prisma.user.create({
+          data: {
+            firstName: payload.given_name,
+            lastName: payload.family_name,
+            email: payload.email,
+            image: payload.picture,
+          },
+        });
+
+        const token = await this.generateJwtToken(newUser);
+        return token;
+      }
+      const token = await this.generateJwtToken(isUserExist);
+      return token;
+    } catch (err) {
+      this.logger.error(`Auth error ${err.message}`);
+      throw new UnauthorizedException('Error during authentication');
+    }
   }
 }
