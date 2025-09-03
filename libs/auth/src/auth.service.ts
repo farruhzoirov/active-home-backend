@@ -1,10 +1,9 @@
 import { Injectable, Logger, UnauthorizedException } from '@nestjs/common';
 import { OAuth2Client, TokenPayload } from 'google-auth-library';
-import * as jwt from 'jsonwebtoken';
 import { PrismaService } from '../../database/src/prisma.service';
 import { ConfigService } from '@nestjs/config';
 import { GoogleAuthDto } from './dto/auth.dto';
-import { User } from '@prisma/client';
+import { JwtHelper } from 'libs/helpers/jwt.helper';
 
 @Injectable()
 export class AuthService {
@@ -13,13 +12,10 @@ export class AuthService {
   constructor(
     private readonly configService: ConfigService,
     private prisma: PrismaService,
+    private jwtHelper: JwtHelper,
   ) {
     if (!configService.get('AUTH').GOOGLE_CLIENT_ID) {
       this.logger.error('GOOGLE_CLIENT_ID not found ');
-    }
-
-    if (!configService.get('AUTH').JWT_SECRET_KEY) {
-      this.logger.error('JWT_SECRET_KEY not found ');
     }
   }
 
@@ -38,14 +34,6 @@ export class AuthService {
     }
   }
 
-  async generateJwtToken(payload: User): Promise<string> {
-    const jwtSecretKey = this.configService.get('AUTH').JWT_SECRET_KEY;
-    const { role, ...rest } = payload;
-    return jwt.sign(rest, jwtSecretKey, {
-      expiresIn: '7d',
-    });
-  }
-
   async registerOrLoginWithGoogle(
     googleAuthDto: GoogleAuthDto,
   ): Promise<string> {
@@ -53,7 +41,7 @@ export class AuthService {
       const payload = await this.verifyGoogleAuthToken(googleAuthDto.idToken);
 
       if (!payload) throw new UnauthorizedException('Invalid IdToken');
-      const isUserExist = await this.prisma.user.findFirst({
+      const isUserExist = await this.prisma.user.findUnique({
         where: {
           email: payload.email,
         },
@@ -69,10 +57,19 @@ export class AuthService {
           },
         });
 
-        const token = await this.generateJwtToken(newUser);
+        const token = await this.jwtHelper.generateJwtToken(newUser);
         return token;
       }
-      const token = await this.generateJwtToken(isUserExist);
+      const updateExistingUser = await this.prisma.user.update({
+        where: { email: payload.email },
+        data: {
+          firstName: payload.given_name,
+          lastName: payload.family_name,
+          email: payload.email,
+          image: payload.picture,
+        },
+      });
+      const token = await this.jwtHelper.generateJwtToken(updateExistingUser);
       return token;
     } catch (err) {
       this.logger.error(`Auth error ${err.message}`);
