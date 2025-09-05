@@ -35,7 +35,7 @@ export class BotService {
     Logger.log('Bot is running ✅');
   }
 
-  async askingPhoneNumber(telegramId: number) {
+  async requestPhoneNumber(telegramId: number) {
     await this.bot.api.sendMessage(
       telegramId,
       'Iltimos xavfsizlik yuzasidan telefon raqamingizni ulashing',

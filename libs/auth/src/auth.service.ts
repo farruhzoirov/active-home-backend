@@ -38,7 +38,7 @@ export class AuthService {
     }
   }
 
-  async checkTelegramAuthHash(telegramAuthDto: TelegramAuthDto) {
+  async verifyTelegramAuthHash(telegramAuthDto: TelegramAuthDto) {
     const { hash, ...userData } = telegramAuthDto;
     const secret = crypto
       .createHash('sha256')
@@ -86,7 +86,7 @@ export class AuthService {
         const token = await this.jwtHelper.generateJwtToken(newUser);
         return token;
       }
-      const updateExistingUser = await this.prisma.user.update({
+      const updatedUser = await this.prisma.user.update({
         where: { email: payload.email },
         data: {
           firstName: payload.given_name,
@@ -95,7 +95,7 @@ export class AuthService {
           image: payload.picture,
         },
       });
-      const token = await this.jwtHelper.generateJwtToken(updateExistingUser);
+      const token = await this.jwtHelper.generateJwtToken(updatedUser);
       return token;
     } catch (err) {
       this.logger.error(`Auth error ${err.message}`);
@@ -105,32 +105,37 @@ export class AuthService {
 
   async registerOrLoginWithTelegram(telegramAuthDto: TelegramAuthDto) {
     try {
-      const isValidAuthHash = this.checkTelegramAuthHash(telegramAuthDto);
+      const isValidAuthHash =
+        await this.verifyTelegramAuthHash(telegramAuthDto);
 
       if (!isValidAuthHash) {
         throw new UnauthorizedException('Invalid hash');
       }
-      const isUserExist = await this.prisma.user.findFirst({
+      const existingUser = await this.prisma.user.findFirst({
         where: {
-          telegramId: telegramAuthDto.id,
+          telegramId: telegramAuthDto.telegramId,
         },
       });
 
-      if (!isUserExist) {
+      if (!existingUser) {
         const newUser = await this.prisma.user.create({
           data: {
-            telegramId: telegramAuthDto.id,
+            telegramId: telegramAuthDto.telegramId,
             firstName: telegramAuthDto?.first_name,
             lastName: telegramAuthDto?.last_name,
             telegramUserName: telegramAuthDto?.username,
             image: telegramAuthDto?.photo_url,
           },
         });
-        this.botService.askingPhoneNumber(telegramAuthDto.id);
+        await this.botService.requestPhoneNumber(telegramAuthDto.telegramId);
         return this.jwtHelper.generateJwtToken(newUser);
       }
 
-      return this.jwtHelper.generateJwtToken(isUserExist);
+      if (!existingUser.phone) {
+        await this.botService.requestPhoneNumber(telegramAuthDto.telegramId);
+      }
+
+      return this.jwtHelper.generateJwtToken(existingUser);
     } catch (err) {
       this.logger.error('Error with telegram auth', err);
       throw new UnauthorizedException('Error with telegram auth');

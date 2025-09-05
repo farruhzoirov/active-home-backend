@@ -10,7 +10,7 @@ export class GoogleAuthDto {
 export class TelegramAuthDto {
   @ApiProperty()
   @IsNumber()
-  id: number;
+  telegramId: number;
 
   @ApiProperty()
   @IsString()
