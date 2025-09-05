@@ -23,7 +23,7 @@ model User {
   authProvider AuthProvider?
   providerId  String?
   telegramUserName    String?   @unique
-  telegramId  String?   @unique
+  telegramId  BigInt?   @unique
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 }
@@ -35,7 +35,7 @@ enum Role {
   SUPER_ADMIN
 }
 
-enum Gender {
+ enum Gender {
   MALE
   FEMALE
 }

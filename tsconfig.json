@@ -18,6 +18,12 @@
     "strictBindCallApply": false,
     "noFallthroughCasesInSwitch": false,
     "paths": {
+      "@app/bot": [
+        "libs/bot/src"
+      ],
+      "@app/bot/*": [
+        "libs/bot/src/*"
+      ],
       "@app/config": [
         "libs/config/src"
       ],

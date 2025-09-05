@@ -1,6 +1,6 @@
 import { Controller, Post, Body, HttpCode, HttpStatus } from '@nestjs/common';
 import { AuthService } from './auth.service';
-import { GoogleAuthDto } from './dto/auth.dto';
+import { GoogleAuthDto, TelegramAuthDto } from './dto/auth.dto';
 
 @Controller('auth')
 export class AuthController {
@@ -19,11 +19,18 @@ export class AuthController {
     };
   }
 
-  // @Post('login/telegram')
-  // @HttpCode(HttpStatus.OK)
-  // async telegramLogin(@Body() authDto: TelegramAuthDto) {
-  //   return this.authService.telegramAuth(authDto);
-  // }
+  @Post('telegram')
+  @HttpCode(HttpStatus.OK)
+  async telegramLogin(@Body() telegramAuthDto: TelegramAuthDto) {
+    const token =
+      await this.authService.registerOrLoginWithTelegram(telegramAuthDto);
+
+    return {
+      token,
+      message: 'Authorized successfully',
+      status: true,
+    };
+  }
 
   // @Post('register')
   // @HttpCode(HttpStatus.CREATED)

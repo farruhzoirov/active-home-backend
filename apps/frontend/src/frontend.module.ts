@@ -5,6 +5,7 @@ import { DatabaseModule } from '@app/database';
 import { ConfigModule } from '@nestjs/config';
 import { configurations } from '@app/config';
 import { AuthModule } from 'libs/auth/src';
+import { BotModule } from '@app/bot';
 
 @Module({
   imports: [

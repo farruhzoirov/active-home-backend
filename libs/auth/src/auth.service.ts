@@ -1,9 +1,12 @@
 import { Injectable, Logger, UnauthorizedException } from '@nestjs/common';
+import * as crypto from 'crypto';
 import { OAuth2Client, TokenPayload } from 'google-auth-library';
 import { PrismaService } from '../../database/src/prisma.service';
 import { ConfigService } from '@nestjs/config';
-import { GoogleAuthDto } from './dto/auth.dto';
+import { GoogleAuthDto, TelegramAuthDto } from './dto/auth.dto';
 import { JwtHelper } from 'libs/helpers/jwt.helper';
+import { AuthProvider } from '@prisma/client';
+import { BotService } from '@app/bot';
 
 @Injectable()
 export class AuthService {
@@ -12,6 +15,7 @@ export class AuthService {
   constructor(
     private readonly configService: ConfigService,
     private prisma: PrismaService,
+    private botService: BotService,
     private jwtHelper: JwtHelper,
   ) {
     if (!configService.get('AUTH').GOOGLE_CLIENT_ID) {
@@ -34,6 +38,26 @@ export class AuthService {
     }
   }
 
+  async checkTelegramAuthHash(telegramAuthDto: TelegramAuthDto) {
+    const { hash, ...userData } = telegramAuthDto;
+    const secret = crypto
+      .createHash('sha256')
+      .update(this.configService.get('AUTH').TELEGRAM_BOT_TOKEN)
+      .digest();
+
+    const checkString = Object.keys(userData)
+      .sort()
+      .map((key) => `${key}=${userData[key]}`)
+      .join('\n');
+
+    const hmac = crypto
+      .createHmac('sha256', secret)
+      .update(checkString)
+      .digest('hex');
+
+    return hmac === hash;
+  }
+
   async registerOrLoginWithGoogle(
     googleAuthDto: GoogleAuthDto,
   ): Promise<string> {
@@ -41,6 +65,7 @@ export class AuthService {
       const payload = await this.verifyGoogleAuthToken(googleAuthDto.idToken);
 
       if (!payload) throw new UnauthorizedException('Invalid IdToken');
+
       const isUserExist = await this.prisma.user.findUnique({
         where: {
           email: payload.email,
@@ -54,6 +79,7 @@ export class AuthService {
             lastName: payload.family_name,
             email: payload.email,
             image: payload.picture,
+            authProvider: AuthProvider.GOOGLE,
           },
         });
 
@@ -74,6 +100,40 @@ export class AuthService {
     } catch (err) {
       this.logger.error(`Auth error ${err.message}`);
       throw new UnauthorizedException('Error during authentication');
+    }
+  }
+
+  async registerOrLoginWithTelegram(telegramAuthDto: TelegramAuthDto) {
+    try {
+      const isValidAuthHash = this.checkTelegramAuthHash(telegramAuthDto);
+
+      if (!isValidAuthHash) {
+        throw new UnauthorizedException('Invalid hash');
+      }
+      const isUserExist = await this.prisma.user.findFirst({
+        where: {
+          telegramId: telegramAuthDto.id,
+        },
+      });
+
+      if (!isUserExist) {
+        const newUser = await this.prisma.user.create({
+          data: {
+            telegramId: telegramAuthDto.id,
+            firstName: telegramAuthDto?.first_name,
+            lastName: telegramAuthDto?.last_name,
+            telegramUserName: telegramAuthDto?.username,
+            image: telegramAuthDto?.photo_url,
+          },
+        });
+        this.botService.askingPhoneNumber(telegramAuthDto.id);
+        return this.jwtHelper.generateJwtToken(newUser);
+      }
+
+      return this.jwtHelper.generateJwtToken(isUserExist);
+    } catch (err) {
+      this.logger.error('Error with telegram auth', err);
+      throw new UnauthorizedException('Error with telegram auth');
     }
   }
 }

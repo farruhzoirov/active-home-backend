@@ -28,6 +28,15 @@
         "tsConfigPath": "apps/app/tsconfig.app.json"
       }
     },
+    "bot": {
+      "type": "library",
+      "root": "libs/bot",
+      "entryFile": "index",
+      "sourceRoot": "libs/bot/src",
+      "compilerOptions": {
+        "tsConfigPath": "libs/bot/tsconfig.lib.json"
+      }
+    },
     "config": {
       "type": "library",
       "root": "libs/config",

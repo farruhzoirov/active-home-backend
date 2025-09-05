@@ -1,9 +1,20 @@
 import { NestFactory } from '@nestjs/core';
 import { FrontendModule } from './frontend.module';
 import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
+import { NestExpressApplication } from '@nestjs/platform-express';
 
 async function bootstrap() {
-  const app = await NestFactory.create(FrontendModule);
+  const app = await NestFactory.create<NestExpressApplication>(FrontendModule);
+
+  app.enableCors({
+    origin: '*',
+    // 'https://linguabarno-payments.netlify.app',
+    // 'https://dynamics-market.uz',
+    // 'https://admin.dynamics-market.uz',
+    methods: 'GET,HEAD,PUT,PATCH,POST,DELETE',
+    allowedHeaders:
+      'Content-Type, Authorization, Accept-Language, App-Type, Accept',
+  });
 
   // app.use(
   //   ['/api-docs'],
